@@ -1,0 +1,13 @@
+i want to make a mobile responsive web_app in which i can add a folder with subfolders containing images.
+
+in the interface i should be able to see the progress of how many are done annotating for each sub folder and also scroll on and see the images, and i can start by clicking start on the sub folder or opening an image in the dub folder.
+
+when i open a sub folder, i should be able to see the progress on top along with how many images are loaded. 50 future images must be loaded in the begining. and it should keep last 20 too, if i want to revisit. also for every visited image, i want their current status shown(true or false or skipped or new_visit)
+
+when i open a sub folder, it should open the last unannotated image but only after loading 50 next and 20 past images, that also should be shown in the loading screen.
+
+the annotation interface should allow pinch type zooming in out and the following gestures:
+
+left for False, right for True, up for skip image and down for going back to the past image.
+
+build the app like how a team of 5 google deepminds expert would
