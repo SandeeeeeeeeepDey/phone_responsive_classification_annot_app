@@ -9,7 +9,7 @@ export default function SubfolderView() {
     setCurrentView, annotations, getImageUrl, pseudoLabels
   } = useAppContext();
 
-  const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage'];
+  const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage', 'rotated'];
 
   const [images, setImages] = useState(getImagesForFolder(activeFolder));
   const [loading, setLoading] = useState(images.length === 0);

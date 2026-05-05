@@ -12,7 +12,7 @@ export default function AnnotationView() {
     pseudoLabels
   } = useAppContext();
 
-  const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage'];
+  const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage', 'rotated'];
 
   // ─── Image list ──────────────────────────────────────────────────────────
   const [allImages, setAllImages] = useState(getImagesForFolder(activeFolder));
