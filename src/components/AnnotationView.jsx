@@ -188,13 +188,23 @@ export default function AnnotationView() {
     onDrag: (state) => {
       if (showClassPicker) return; // Disable gestures when picker is open
 
-      const { movement: [mx, my] } = state;
+      const { movement: [mx, my], event, first } = state;
+      
+      // Maintain start position for seamless panning across multiple drags
+      let startPos = state.memo;
+      if (first) {
+        startPos = [x.get(), y.get()];
+      }
+      
       const triggerThreshold = 100;
 
-      // If zoomed in, allow panning instead of swiping
-      if (scale.get() > 1 && !state.last) {
-        api.start({ x: mx, y: my, immediate: true });
-        return;
+      // Check if touch originates on the image wrapper
+      const isTargetImage = event && event.target && typeof event.target.closest === 'function' && event.target.closest('.image-pan-area') !== null;
+
+      // If zoomed in and touching the image, allow panning instead of swiping
+      if (scale.get() > 1 && isTargetImage) {
+        api.start({ x: startPos[0] + mx, y: startPos[1] + my, immediate: !state.last });
+        return startPos;
       }
 
       // Live gesture feedback
@@ -232,12 +242,16 @@ export default function AnnotationView() {
         return;
       }
 
-      if (scale.get() <= 1) {
-        api.start({ x: state.active ? mx : 0, y: state.active ? my : 0, immediate: state.active });
-      }
+      // Animate swiping when not panning
+      api.start({ x: state.active ? mx : 0, y: state.active ? my : 0, immediate: state.active });
+      return startPos;
     },
-    onPinch: ({ offset: [s] }) => {
-      api.start({ scale: s });
+    onPinch: ({ offset: [s], last }) => {
+      if (last && s <= 1) {
+        api.start({ scale: 1, x: 0, y: 0 }); // reset pan when zooming out completely
+      } else {
+        api.start({ scale: s });
+      }
     },
   }, {
     drag: { filterTaps: true },
@@ -307,7 +321,7 @@ export default function AnnotationView() {
       </div>
 
       {/* Main Annotation Area */}
-      <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden w-full h-full p-4">
+      <div {...bind()} style={{ touchAction: showClassPicker ? 'auto' : 'none' }} className="flex-1 relative flex flex-col items-center justify-center overflow-hidden w-full h-full p-4">
         
         {/* Pseudo Label Hint (Moved outside/above image) */}
         {pseudoLabels[currentImageName] && !currentStatus && !initialLoading && (
@@ -327,14 +341,12 @@ export default function AnnotationView() {
         {!initialLoading && currentUrl && (
           <animated.div
             key={currentIndex}
-            {...bind()}
             style={{ 
               x, y, 
               scale: isRegistering ? 0.95 : scale, 
-              opacity: isRegistering ? 0.8 : 1,
-              touchAction: 'none' 
+              opacity: isRegistering ? 0.8 : 1
             }}
-            className={`w-full h-full max-h-[70vh] rounded-2xl overflow-hidden glass shadow-2xl relative select-none will-change-transform transition-colors duration-200 ${isRegistering ? 'ring-4 ring-white/50' : ''}`}
+            className={`image-pan-area w-full h-full max-h-[70vh] rounded-2xl overflow-hidden glass shadow-2xl relative select-none will-change-transform transition-colors duration-200 ${isRegistering ? 'ring-4 ring-white/50' : ''}`}
           >
             {/* Registration Flash Overlay */}
             <AnimatePresence>
@@ -627,6 +639,12 @@ export default function AnnotationView() {
                 <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400"><ZoomIn size={18} /></div>
                 <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Pinch<br/><b className="text-white text-xs">Zoom In</b></span>
               </div>
+            </div>
+            <div className="mt-2 bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex items-start gap-2">
+              <Info size={16} className="text-blue-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                To navigate, you must either <b className="text-blue-300">zoom out completely</b> or <b className="text-blue-300">swipe outside</b> the zoomed image area.
+              </p>
             </div>
           </motion.div>
         )}
