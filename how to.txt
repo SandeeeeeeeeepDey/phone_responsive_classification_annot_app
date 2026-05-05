@@ -1,5 +1,8 @@
+npm i
+
 npm run build
 
 
-node server.js "D:\AwesomenessProwess\DocuXray\docuxary_ai_engine\Dataset\BankStatements"
+node server.js "C:\Users\xelpmoc\Downloads\New folder\selected"
 
+npm run dev

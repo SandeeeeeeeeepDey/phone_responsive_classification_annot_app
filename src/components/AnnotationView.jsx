@@ -3,7 +3,7 @@ import { useAppContext } from '../App';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSpring, animated } from '@react-spring/web';
 import { useGesture } from '@use-gesture/react';
-import { ChevronLeft, Check, X, SkipForward, RefreshCw, ZoomIn, Eye, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, Check, X, SkipForward, RefreshCw, ZoomIn, Eye, ArrowLeft, Info, ArrowRight, EyeOff } from 'lucide-react';
 
 export default function AnnotationView() {
   const {
@@ -117,6 +117,8 @@ export default function AnnotationView() {
   const [showClassPicker, setShowClassPicker] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [gestureFeedback, setGestureFeedback] = useState(null);
+  const [hideOverlay, setHideOverlay] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   // Sync refs to avoid stale closures in gesture handlers
   const currentIndexRef = useRef(currentIndex);
@@ -168,6 +170,18 @@ export default function AnnotationView() {
        setCurrentIndex(c => Math.max(0, c - 1));
     }, 200);
   }, []);
+
+  const goNext = useCallback(() => {
+    setIsRegistering(true);
+    setTimeout(() => {
+       setIsRegistering(false);
+       setCurrentIndex(c => Math.min(allImagesRef.current.length - 1, c + 1));
+    }, 200);
+  }, []);
+
+  useEffect(() => {
+    setHideOverlay(false);
+  }, [currentIndex]);
 
   // ─── Gesture handler ────────────────────────────────────────────────────
   const bind = useGesture({
@@ -342,7 +356,7 @@ export default function AnnotationView() {
             />
 
             {/* Status overlay for annotated images */}
-            {currentStatus && (
+            {currentStatus && !hideOverlay && (
               <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center p-6 text-center">
                 {currentStatus === 'skip' ? (
                   <>
@@ -546,31 +560,77 @@ export default function AnnotationView() {
       </div>
 
       {/* Guide Footer */}
-      <div className="h-20 bg-slate-900/80 backdrop-blur-lg border-t border-slate-800 flex items-center justify-around px-2 pb-safe">
+      <div className="h-20 bg-slate-900/80 backdrop-blur-lg border-t border-slate-800 flex items-center justify-around px-2 pb-safe z-20">
         <button 
           onClick={goBack}
-          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all"
+          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all w-16"
         >
           <ArrowLeft size={24} className="mb-1 text-blue-400" />
           <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Back</span>
         </button>
-        <div className="flex flex-col items-center opacity-70">
-          <ChevronLeft size={20} className="mb-1 text-red-500" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">False</span>
-        </div>
-        <div className="flex flex-col items-center opacity-70">
-          <Check size={20} className="mb-1 text-green-500" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Confirm</span>
-        </div>
-        <div className="flex flex-col items-center opacity-70">
-          <SkipForward size={20} className="mb-1 text-slate-300" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Skip (Up)</span>
-        </div>
-        <div className="flex flex-col items-center opacity-70">
-          <ZoomIn size={20} className="mb-1 text-blue-400" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Pinch</span>
-        </div>
+        
+        <button 
+          onClick={() => setShowGuide(true)}
+          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all w-16"
+        >
+          <Info size={24} className="mb-1 text-slate-300" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Guide</span>
+        </button>
+
+        <button 
+          onClick={() => setHideOverlay(prev => !prev)}
+          disabled={!currentStatus}
+          className={`flex flex-col items-center hover:opacity-100 active:scale-90 transition-all w-16 ${currentStatus ? (hideOverlay ? 'opacity-100 text-purple-400' : 'opacity-80 text-white') : 'opacity-30 cursor-not-allowed text-slate-500'}`}
+        >
+          {hideOverlay ? <EyeOff size={24} className="mb-1" /> : <Eye size={24} className="mb-1" />}
+          <span className="text-[10px] font-bold uppercase tracking-wider">View</span>
+        </button>
+
+        <button 
+          onClick={goNext}
+          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all w-16"
+        >
+          <ArrowRight size={24} className="mb-1 text-blue-400" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Next</span>
+        </button>
       </div>
+
+      {/* Guide Modal */}
+      <AnimatePresence>
+        {showGuide && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.95 }}
+            className="absolute bottom-24 left-4 right-4 p-5 bg-slate-900/95 backdrop-blur-xl border border-slate-700 rounded-2xl z-[100] shadow-2xl flex flex-col gap-4"
+          >
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="text-white font-bold uppercase tracking-wider text-sm">Gesture Guide</h3>
+              <button onClick={() => setShowGuide(false)} className="text-slate-400 hover:text-white p-1 bg-slate-800 rounded-full">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-red-500/20 rounded-lg text-red-500"><ChevronLeft size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Swipe Left<br/><b className="text-white text-xs">Relabel</b></span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-green-500/20 rounded-lg text-green-500"><Check size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Swipe Right<br/><b className="text-white text-xs">Confirm</b></span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-slate-500/20 rounded-lg text-slate-300"><SkipForward size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Swipe Up<br/><b className="text-white text-xs">Skip</b></span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400"><ZoomIn size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Pinch<br/><b className="text-white text-xs">Zoom In</b></span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
