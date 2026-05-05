@@ -27,6 +27,10 @@ const ANNOTATIONS_FILE = path.join(ROOT_FOLDER, 'annotations.json');
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.svg']);
 const PORT = process.env.PORT || 3001;
 
+// Pseudo-labels from CSV/Metadata
+let PSEUDO_LABELS = {}; // { "folder/filename": "pseudo_label" }
+let HAS_METADATA = false;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 function isImageFile(filename) {
   return IMAGE_EXTENSIONS.has(path.extname(filename).toLowerCase());
@@ -44,6 +48,45 @@ async function loadAnnotations() {
 async function saveAnnotations(annotations) {
   await writeFile(ANNOTATIONS_FILE, JSON.stringify(annotations, null, 2), 'utf-8');
 }
+
+async function loadMetadata() {
+  try {
+    const files = await readdir(ROOT_FOLDER);
+    const csvFile = files.find(f => f.endsWith('.csv'));
+    if (!csvFile) return;
+
+    const content = await readFile(path.join(ROOT_FOLDER, csvFile), 'utf-8');
+    const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length < 1) return;
+
+    const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+    const imgIdx = headers.findIndex(h => h.includes('image') || h.includes('file') || h.includes('name'));
+    const labelIdx = headers.findIndex(h => h.includes('label') || h.includes('class') || h.includes('pseudo'));
+
+    if (imgIdx === -1 || labelIdx === -1) {
+      console.warn(`⚠️  Found CSV ${csvFile} but couldn't identify image/label columns in headers: ${headers.join(', ')}`);
+      return;
+    }
+
+    const labels = {};
+    for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
+        if (parts.length > Math.max(imgIdx, labelIdx)) {
+            const imgName = parts[imgIdx];
+            const label = parts[labelIdx];
+            labels[imgName] = label;
+        }
+    }
+    PSEUDO_LABELS = labels;
+    HAS_METADATA = true;
+    console.log(`✅  Loaded ${Object.keys(labels).length} pseudo-labels from ${csvFile}`);
+  } catch (err) {
+    console.error('❌  Error loading metadata:', err.message);
+  }
+}
+
+// Initial metadata load
+await loadMetadata();
 
 function getNetworkAddresses() {
   const interfaces = os.networkInterfaces();
@@ -112,9 +155,24 @@ app.get('/api/folders', async (req, res) => {
       });
     }
 
+    // If metadata exists, add a special "Dataset" folder
+    if (HAS_METADATA) {
+      const metadataImages = Object.keys(PSEUDO_LABELS);
+      const annotatedCount = metadataImages.filter(img => annotations[`_dataset/${img}`]).length;
+      folders.push({
+        name: '_dataset',
+        displayName: 'Dataset Mode',
+        totalCount: metadataImages.length,
+        annotatedCount,
+        isDataset: true
+      });
+    }
+
     folders.sort((a, b) => {
-      if (a.name === '_root') return -1;
-      if (b.name === '_root') return 1;
+      if (a.name === '_dataset') return -1;
+      if (a.name === '_root') return (b.name === '_dataset' ? 1 : -1);
+      if (b.name === '_dataset') return 1;
+      if (b.name === '_root') return (a.name === '_dataset' ? -1 : 1);
       return a.name.localeCompare(b.name);
     });
 
@@ -128,6 +186,11 @@ app.get('/api/folders', async (req, res) => {
 app.get('/api/folders/:name/images', async (req, res) => {
   try {
     const folderName = req.params.name;
+    
+    if (folderName === '_dataset') {
+        return res.json(Object.keys(PSEUDO_LABELS));
+    }
+
     const folderPath = folderName === '_root'
       ? ROOT_FOLDER
       : path.join(ROOT_FOLDER, folderName);
@@ -149,9 +212,17 @@ app.get('/api/folders/:name/images', async (req, res) => {
 // --- API: Serve an image file ---
 app.get('/api/images/:folder/:filename', (req, res) => {
   const { folder, filename } = req.params;
-  const filePath = folder === '_root'
-    ? path.join(ROOT_FOLDER, filename)
-    : path.join(ROOT_FOLDER, folder, filename);
+  let filePath;
+
+  if (folder === '_dataset') {
+    // For dataset mode, search for the image file recursively or in root
+    // To keep it simple, we assume it's either in root or we search for it
+    filePath = path.join(ROOT_FOLDER, filename);
+  } else {
+    filePath = folder === '_root'
+      ? path.join(ROOT_FOLDER, filename)
+      : path.join(ROOT_FOLDER, folder, filename);
+  }
 
   // Security: prevent path traversal
   const resolved = path.resolve(filePath);
@@ -171,6 +242,11 @@ app.get('/api/images/:folder/:filename', (req, res) => {
 app.get('/api/annotations', async (req, res) => {
   const annotations = await loadAnnotations();
   res.json(annotations);
+});
+
+// --- API: Get pseudo labels ---
+app.get('/api/pseudo-labels', (req, res) => {
+  res.json(PSEUDO_LABELS);
 });
 
 // --- API: Save a single annotation ---

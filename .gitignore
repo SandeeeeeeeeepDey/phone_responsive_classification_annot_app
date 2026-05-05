@@ -37,3 +37,7 @@ Desktop.ini
 
 # Annotation data (generated at runtime)
 annotations.json
+
+dataset/
+my_data/
+sks/

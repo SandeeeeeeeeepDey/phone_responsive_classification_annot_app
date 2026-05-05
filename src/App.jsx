@@ -63,6 +63,7 @@ export default function App() {
   const [appLoading, setAppLoading] = useState(true);
   const [appError, setAppError] = useState(false);
   const [rootPath, setRootPath] = useState('');
+  const [pseudoLabels, setPseudoLabels] = useState({});
 
   // Navigation
   const [currentView, setCurrentView] = useState('dashboard');
@@ -72,14 +73,16 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
-        const [foldersRes, annotationsRes, configRes] = await Promise.all([
+        const [foldersRes, annotationsRes, configRes, pseudoRes] = await Promise.all([
           fetch('/api/folders').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
           fetch('/api/annotations').then(r => r.json()),
           fetch('/api/config').then(r => r.json()),
+          fetch('/api/pseudo-labels').then(r => r.json()).catch(() => ({})),
         ]);
         setFoldersInfo(foldersRes);
         setAnnotations(annotationsRes);
         setRootPath(configRes.rootPath);
+        setPseudoLabels(pseudoRes);
       } catch (err) {
         console.error('Failed to connect to server:', err);
         setAppError(true);
@@ -156,6 +159,7 @@ export default function App() {
     getImageUrl,
     loadFolderImages,
     rootPath,
+    pseudoLabels,
   };
 
   return (
