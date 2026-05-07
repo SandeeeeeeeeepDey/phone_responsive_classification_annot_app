@@ -14,6 +14,7 @@ A mobile-responsive image classification annotation tool built with React + Vite
 - **⚡ Smart Preloading** — Caches 50 upcoming + 20 previous images for instant navigation
 - **📡 LAN Access** — Annotate from your phone while the server runs on your desktop
 - **💾 Persistent Storage** — Annotations saved as JSON in the image directory
+- **📊 Dataset Mode** — Load labels from a CSV file (e.g., `labels.csv`) to review existing predictions
 
 ---
 
@@ -59,6 +60,32 @@ A mobile-responsive image classification annotation tool built with React + Vite
   │   └── img004.png
   └── ...
   ```
+
+### 📊 Dataset Mode (CSV Support)
+
+DeepAnnotate can load existing labels or pseudo-labels from a CSV file. If a `.csv` file is found in the root folder, a special **"Dataset Mode"** folder will appear in the dashboard.
+
+#### Method of making the CSV:
+If you are using Python/Pandas, you can generate the compatible CSV like this:
+
+```python
+import pandas as pd
+
+# Create a dataframe with your images and labels
+df = pd.DataFrame({
+    'image_name': ['img1.jpg', 'img2.png'],
+    'label': ['clear', 'noisy']
+})
+
+# Save it to the root of your image folder
+# IMPORTANT: Use index=False to avoid "Unnamed: 0" columns
+df.to_csv('labels.csv', index=False)
+```
+
+**Requirements:**
+- The CSV must have one column for **filenames** (e.g., `image_name`, `filename`, `image`)
+- The CSV must have one column for **labels** (e.g., `label`, `class`, `pseudo_label`)
+- Place the `.csv` file directly inside the `ROOT_FOLDER`.
 
 ### Installation
 
@@ -115,6 +142,11 @@ node server.js "path/to/images"
 
 # Terminal 2 — Start Vite dev server
 npm run dev
+
+# 📊 Dataset Mode (CSV)
+# 1. Create a CSV (e.g. labels_2.csv) with columns: image_name, label
+# 2. Place it in the selected folder
+# 3. If using Pandas: df.to_csv('labels_2.csv', index=False)
 ```
 
 The Vite dev server proxies `/api` requests to the backend automatically.

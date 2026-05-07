@@ -120,8 +120,8 @@ async function loadMetadata() {
     if (lines.length < 1) return;
 
     const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
-    const imgIdx = headers.findIndex(h => h.includes('image') || h.includes('file') || h.includes('name'));
-    const labelIdx = headers.findIndex(h => h.includes('label') || h.includes('class') || h.includes('pseudo'));
+    const imgIdx = headers.findIndex(h => (h.includes('image') || h.includes('file') || h.includes('name')) && !h.includes('unnamed'));
+    const labelIdx = headers.findIndex(h => (h.includes('label') || h.includes('class') || h.includes('pseudo')) && !h.includes('unnamed'));
 
     if (imgIdx === -1 || labelIdx === -1) {
       console.warn(`⚠️  Found CSV ${csvFile} but couldn't identify image/label columns in headers: ${headers.join(', ')}`);
@@ -255,9 +255,11 @@ app.get('/api/folders/:name/images', async (req, res) => {
       ? ROOT_FOLDER
       : path.join(ROOT_FOLDER, folderName);
 
-    // Security: ensure path is within ROOT_FOLDER
     const resolved = path.resolve(folderPath);
-    if (!resolved.startsWith(path.resolve(ROOT_FOLDER))) {
+    const rootResolved = path.resolve(ROOT_FOLDER);
+    const relative = path.relative(rootResolved, resolved);
+    
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -284,9 +286,11 @@ app.get('/api/images/:folder/:filename', (req, res) => {
       : path.join(ROOT_FOLDER, folder, filename);
   }
 
-  // Security: prevent path traversal
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(ROOT_FOLDER))) {
+  const rootResolved = path.resolve(ROOT_FOLDER);
+  const relative = path.relative(rootResolved, resolved);
+
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
