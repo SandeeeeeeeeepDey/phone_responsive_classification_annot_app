@@ -184,12 +184,35 @@ export default function AnnotationView() {
   }, [currentIndex]);
 
   // ─── Gesture handler ────────────────────────────────────────────────────
+  // Track if a two-finger gesture was active so we can cancel the drag on release
+  const wasTwoFingerRef = useRef(false);
+
   const bind = useGesture({
     onDrag: (state) => {
       if (showClassPicker) return; // Disable gestures when picker is open
 
-      const { movement: [mx, my], event, first } = state;
-      
+      const { movement: [mx, my], event, first, touches } = state;
+
+      // ── Two-finger guard ────────────────────────────────────────────────
+      // If 2+ fingers are active, this is part of a pinch – ignore completely.
+      if (touches >= 2) {
+        wasTwoFingerRef.current = true;
+        setGestureFeedback(null);
+        return state.memo; // keep memo but do nothing
+      }
+
+      // If the drag started with 2 fingers and we just dropped to 1, cancel the
+      // whole gesture so the lifting finger doesn't trigger a swipe action.
+      if (wasTwoFingerRef.current) {
+        if (state.last) {
+          wasTwoFingerRef.current = false;
+          api.start({ x: 0, y: 0, immediate: false });
+        }
+        setGestureFeedback(null);
+        return state.memo;
+      }
+      // ────────────────────────────────────────────────────────────────────
+
       // Maintain start position for seamless panning across multiple drags
       let startPos = state.memo;
       if (first) {
@@ -254,7 +277,13 @@ export default function AnnotationView() {
     },
     onPinch: ({ offset: [s], last }) => {
       if (s <= 1) {
-        api.start({ scale: last ? 1 : s, x: 0, y: 0 }); // reset pan when zooming out completely
+        if (last) {
+          // Only snap to center when both fingers are fully lifted
+          api.start({ scale: 1, x: 0, y: 0, immediate: false });
+        } else {
+          // While still pinching, just update the scale without touching x/y
+          api.start({ scale: s });
+        }
       } else {
         // Dynamically clamp pan based on scale to ensure it naturally centers while zooming out
         const maxPanX = (s - 1) * window.innerWidth / 2;
