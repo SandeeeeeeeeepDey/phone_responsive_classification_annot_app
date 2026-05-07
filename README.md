@@ -18,6 +18,19 @@ A mobile-responsive image classification annotation tool built with React + Vite
 
 ---
 
+## 🛠️ Technical Specifications
+
+- **🖼️ Image Resolution** — Images are served at **full resolution** (original disk quality) to enable precise inspection.
+- **⚡ Performance** — Background preloading of 70 images (50 ahead, 20 behind) ensures zero-latency navigation.
+- **💾 Storage Architecture** — Dual-layer persistence: **Redis** for high-speed session state + **JSON** for permanent disk storage.
+- **👆 Gesture Engine** — High-precision gesture handling with `@use-gesture`, supporting concurrent pan and zoom.
+- **🌐 Network** — Zero-config LAN discovery; serves over `0.0.0.0` for immediate mobile access.
+- **📦 Backend** — Node.js Express server with atomic file writes to prevent data corruption.
+- **⚛️ Frontend** — React 19 SPA optimized for mobile browsers (Chrome, Safari).
+- **📊 Data Interop** — Supports standard CSV formats for importing existing labels or pseudo-labels.
+
+---
+
 ## 🏗️ Architecture
 
 ```
