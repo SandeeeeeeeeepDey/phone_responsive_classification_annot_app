@@ -203,7 +203,13 @@ export default function AnnotationView() {
 
       // If zoomed in and touching the image, allow panning instead of swiping
       if (scale.get() > 1 && isTargetImage) {
-        api.start({ x: startPos[0] + mx, y: startPos[1] + my, immediate: !state.last });
+        const s = scale.get();
+        const maxPanX = (s - 1) * window.innerWidth / 2;
+        const maxPanY = (s - 1) * window.innerHeight / 2;
+        const nextX = Math.max(-maxPanX, Math.min(maxPanX, startPos[0] + mx));
+        const nextY = Math.max(-maxPanY, Math.min(maxPanY, startPos[1] + my));
+
+        api.start({ x: nextX, y: nextY, immediate: !state.last });
         return startPos;
       }
 
@@ -247,10 +253,16 @@ export default function AnnotationView() {
       return startPos;
     },
     onPinch: ({ offset: [s], last }) => {
-      if (last && s <= 1) {
-        api.start({ scale: 1, x: 0, y: 0 }); // reset pan when zooming out completely
+      if (s <= 1) {
+        api.start({ scale: last ? 1 : s, x: 0, y: 0 }); // reset pan when zooming out completely
       } else {
-        api.start({ scale: s });
+        // Dynamically clamp pan based on scale to ensure it naturally centers while zooming out
+        const maxPanX = (s - 1) * window.innerWidth / 2;
+        const maxPanY = (s - 1) * window.innerHeight / 2;
+        const nextX = Math.max(-maxPanX, Math.min(maxPanX, x.get()));
+        const nextY = Math.max(-maxPanY, Math.min(maxPanY, y.get()));
+        
+        api.start({ scale: s, x: nextX, y: nextY });
       }
     },
   }, {

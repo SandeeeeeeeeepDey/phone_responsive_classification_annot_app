@@ -2,7 +2,8 @@ npm i
 
 npm run build
 
+docker compose up -d
 
-node server.js "C:\Users\xelpmoc\Downloads\New folder\selected"
+node server.js "C:\Users\xelpmoc\Downloads\my_half_quality_annot\selected"
 
 npm run dev

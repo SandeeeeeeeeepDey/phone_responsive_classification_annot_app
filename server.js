@@ -1,8 +1,9 @@
 import express from 'express';
-import { readdir, readFile, writeFile, access } from 'fs/promises';
+import { readdir, readFile, writeFile, access, rename } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
+import { createClient } from 'redis';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,22 +32,81 @@ const PORT = process.env.PORT || 3001;
 let PSEUDO_LABELS = {}; // { "folder/filename": "pseudo_label" }
 let HAS_METADATA = false;
 
+// --- Redis Client Setup ---
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+  socket: {
+    reconnectStrategy: (retries) => {
+      // Exponential backoff with a max limit
+      if (retries > 20) {
+        console.error('❌ Redis max retries reached. Exiting...');
+        return new Error('Max retries reached');
+      }
+      const delay = Math.min(retries * 100, 3000);
+      console.log(`⏱️  Redis reconnecting in ${delay}ms...`);
+      return delay;
+    }
+  }
+});
+
+redisClient.on('error', err => console.error('❌ Redis Client Error:', err.message));
+redisClient.on('connect', () => console.log('✅ Connected to Redis successfully.'));
+redisClient.on('reconnecting', () => console.log('🔄 Reconnecting to Redis...'));
+redisClient.on('ready', () => console.log('🚀 Redis is ready to receive commands.'));
+
+await redisClient.connect();
+const REDIS_KEY = `annotations:${ROOT_FOLDER}`;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 function isImageFile(filename) {
   return IMAGE_EXTENSIONS.has(path.extname(filename).toLowerCase());
 }
 
-async function loadAnnotations() {
+// --- Disk Synchronization (Atomic & Debounced) ---
+let isSyncing = false;
+let syncRequested = false;
+
+async function syncToDisk() {
+  if (isSyncing) {
+    syncRequested = true;
+    return;
+  }
+  isSyncing = true;
+  syncRequested = false;
+
   try {
-    const data = await readFile(ANNOTATIONS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return {};
+    const annotations = await redisClient.hGetAll(REDIS_KEY);
+    const tmpFile = `${ANNOTATIONS_FILE}.tmp`;
+    await writeFile(tmpFile, JSON.stringify(annotations, null, 2), 'utf-8');
+    await rename(tmpFile, ANNOTATIONS_FILE);
+  } catch (err) {
+    console.error('❌ Failed to sync annotations to disk:', err);
+  } finally {
+    isSyncing = false;
+    if (syncRequested) {
+      syncToDisk().catch(console.error);
+    }
   }
 }
 
-async function saveAnnotations(annotations) {
-  await writeFile(ANNOTATIONS_FILE, JSON.stringify(annotations, null, 2), 'utf-8');
+async function initializeAnnotations() {
+  try {
+    const data = await readFile(ANNOTATIONS_FILE, 'utf-8');
+    const parsed = JSON.parse(data);
+    if (Object.keys(parsed).length > 0) {
+      await redisClient.del(REDIS_KEY);
+      for (const [key, val] of Object.entries(parsed)) {
+        await redisClient.hSet(REDIS_KEY, key, String(val));
+      }
+    }
+  } catch {
+    // Ignored if file missing or invalid
+  }
+}
+await initializeAnnotations();
+
+async function loadAnnotations() {
+  return await redisClient.hGetAll(REDIS_KEY);
 }
 
 async function loadMetadata() {
@@ -256,9 +316,10 @@ app.post('/api/annotations', async (req, res) => {
     if (!key || !status) {
       return res.status(400).json({ error: 'key and status required' });
     }
-    const annotations = await loadAnnotations();
-    annotations[key] = status;
-    await saveAnnotations(annotations);
+    
+    await redisClient.hSet(REDIS_KEY, key, String(status));
+    syncToDisk().catch(console.error);
+    
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -268,7 +329,8 @@ app.post('/api/annotations', async (req, res) => {
 // --- API: Reset all annotations ---
 app.delete('/api/annotations', async (req, res) => {
   try {
-    await saveAnnotations({});
+    await redisClient.del(REDIS_KEY);
+    syncToDisk().catch(console.error);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -285,7 +347,7 @@ app.get('/{*splat}', (req, res) => {
 });
 
 // ─── Start Server ───────────────────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   const networkAddresses = getNetworkAddresses();
 
   console.log('\n┌──────────────────────────────────────────────────────┐');
@@ -301,3 +363,13 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('└──────────────────────────────────────────────────────┘');
   console.log('\n  → Open the Network URL on your phone to annotate!\n');
 });
+
+// --- Graceful Shutdown ---
+async function shutdown() {
+  console.log('\n🛑 Shutting down DeepAnnotate Server gracefully...');
+  server.close();
+  await redisClient.quit();
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
