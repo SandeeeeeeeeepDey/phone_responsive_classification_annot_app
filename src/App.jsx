@@ -65,6 +65,74 @@ export default function App() {
   const [rootPath, setRootPath] = useState('');
   const [pseudoLabels, setPseudoLabels] = useState({});
 
+  // Network & Sync State
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingSync, setPendingSync] = useState(() => {
+    const saved = localStorage.getItem('pending_annotations');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Sync pending annotations to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('pending_annotations', JSON.stringify(pendingSync));
+  }, [pendingSync]);
+
+  // Handle Online/Offline events
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Automatic Sync when coming back online
+  useEffect(() => {
+    if (isOnline && Object.keys(pendingSync).length > 0 && !isSyncing) {
+      syncPendingAnnotations();
+    }
+  }, [isOnline]);
+
+  const syncPendingAnnotations = async () => {
+    const keys = Object.keys(pendingSync);
+    if (keys.length === 0) return;
+
+    setIsSyncing(true);
+    console.log(`Syncing ${keys.length} pending annotations...`);
+
+    const newPending = { ...pendingSync };
+    let successCount = 0;
+
+    for (const fileKey of keys) {
+      const status = pendingSync[fileKey];
+      try {
+        const res = await fetch('/api/annotations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: fileKey, status }),
+        });
+        if (res.ok) {
+          delete newPending[fileKey];
+          successCount++;
+        } else {
+          // If server returns error, stop trying for now
+          break;
+        }
+      } catch (err) {
+        // Network error, stop syncing
+        break;
+      }
+    }
+
+    setPendingSync(newPending);
+    setIsSyncing(false);
+    console.log(`Synced ${successCount} annotations.`);
+  };
+
   // Navigation
   const [currentView, setCurrentView] = useState('dashboard');
   const [activeFolder, setActiveFolder] = useState(null);
@@ -125,12 +193,32 @@ export default function App() {
 
   // ─── Annotate an image (optimistic + save to server) ────────────────────
   const handleAnnotate = useCallback(async (fileKey, status) => {
+    // 1. Optimistic UI update
     setAnnotations(prev => ({ ...prev, [fileKey]: status }));
-    fetch('/api/annotations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: fileKey, status }),
-    }).catch(err => console.error('Failed to save annotation:', err));
+
+    // 2. Add to pending sync
+    setPendingSync(prev => ({ ...prev, [fileKey]: status }));
+
+    // 3. Try to save to server immediately if online
+    if (navigator.onLine) {
+      try {
+        const res = await fetch('/api/annotations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: fileKey, status }),
+        });
+        if (res.ok) {
+          // Remove from pending if successful
+          setPendingSync(prev => {
+            const next = { ...prev };
+            delete next[fileKey];
+            return next;
+          });
+        }
+      } catch (err) {
+        console.error('Failed to save annotation, will retry when online:', err);
+      }
+    }
   }, []);
 
   // ─── Reset all annotations ─────────────────────────────────────────────
@@ -160,6 +248,9 @@ export default function App() {
     loadFolderImages,
     rootPath,
     pseudoLabels,
+    isOnline,
+    pendingCount: Object.keys(pendingSync).length,
+    isSyncing,
   };
 
   return (
@@ -168,6 +259,44 @@ export default function App() {
         className="w-full h-[100dvh] overflow-hidden flex flex-col relative text-slate-100 bg-slate-950"
         style={{ fontFamily: 'var(--font-sans)' }}
       >
+        {/* Offline / Sync Banner */}
+        <AnimatePresence>
+          {(!isOnline || Object.keys(pendingSync).length > 0) && (
+            <motion.div
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -50, opacity: 0 }}
+              className={`fixed top-0 left-0 right-0 z-[1000] px-4 py-2 flex items-center justify-between shadow-lg backdrop-blur-md ${
+                !isOnline ? 'bg-red-500/90 text-white' : 'bg-blue-600/90 text-white'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {!isOnline ? (
+                  <>
+                    <WifiOff size={18} />
+                    <span className="text-xs font-bold uppercase tracking-wider">Offline - Work is being saved locally</span>
+                  </>
+                ) : isSyncing ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Syncing {Object.keys(pendingSync).length} annotations...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={18} />
+                    <span className="text-xs font-bold uppercase tracking-wider">{Object.keys(pendingSync).length} unsynced changes</span>
+                  </>
+                )}
+              </div>
+              {!isOnline && (
+                <div className="bg-white/20 px-2 py-0.5 rounded text-[10px] font-black">
+                  LOCAL MODE
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence mode="wait">
           {currentView === 'dashboard' && <Dashboard key="dashboard" onReset={resetProgress} />}
           {currentView === 'folder' && <SubfolderView key="folder" />}

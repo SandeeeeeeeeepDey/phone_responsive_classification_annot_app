@@ -3,13 +3,13 @@ import { useAppContext } from '../App';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSpring, animated } from '@react-spring/web';
 import { useGesture } from '@use-gesture/react';
-import { ChevronLeft, Check, X, SkipForward, RefreshCw, ZoomIn, Eye, ArrowLeft, Info, ArrowRight, EyeOff } from 'lucide-react';
+import { ChevronLeft, Check, X, SkipForward, RefreshCw, ZoomIn, Eye, ArrowLeft, Info, ArrowRight, EyeOff, WifiOff } from 'lucide-react';
 
 export default function AnnotationView() {
   const {
     activeFolder, getImagesForFolder, loadFolderImages,
     setCurrentView, annotations, handleAnnotate, getImageUrl,
-    pseudoLabels
+    pseudoLabels, isOnline, pendingCount
   } = useAppContext();
 
   const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage', 'rotated'];
@@ -327,8 +327,16 @@ export default function AnnotationView() {
           </div>
         </div>
         {/* Status badge in header */}
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold ${statusInfo.bg} ${statusInfo.color} ${statusInfo.border} border`}>
-          {statusInfo.icon}
+        <div className="flex items-center gap-2">
+          {(!isOnline || pendingCount > 0) && (
+            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black border shadow-sm ${!isOnline ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'}`}>
+              {!isOnline ? <WifiOff size={14} /> : <RefreshCw size={14} className="animate-spin" />}
+              {!isOnline ? 'OFFLINE' : `${pendingCount} PENDING`}
+            </div>
+          )}
+          <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold ${statusInfo.bg} ${statusInfo.color} ${statusInfo.border} border`}>
+            {statusInfo.icon}
+          </div>
         </div>
       </div>
 
