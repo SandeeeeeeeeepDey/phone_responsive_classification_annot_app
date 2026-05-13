@@ -6,7 +6,7 @@ docker compose up -d
 
 node server.js "C:\Users\xelpmoc\Downloads\my_half_quality_annot\selected"
 
-node server.js "C:\Users\xelpmoc\Downloads\rashmis_half_quality_annot\selected"
+node server.js "D:\30k_to_7k_clear"
 
 
 npm run dev

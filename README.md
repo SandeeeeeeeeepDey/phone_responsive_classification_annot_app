@@ -1,235 +1,165 @@
-# 🖼️ DeepAnnotate
+# DeepAnnotate
 
-A mobile-responsive image classification annotation tool built with React + Vite and a Node.js/Express backend. Designed for fast, gesture-driven binary classification of images on your phone — powered from your desktop.
+Mobile-first **multi-class** image annotation tool. Swipe on your phone to classify images served from your desktop over LAN.
 
----
-
-## ✨ Features
-
-- **📱 Mobile-First Design** — Optimized for phone screens with touch gestures
-- **👆 Swipe Gestures** — Swipe right for `True`, left for `False`, up to `Skip`, down to go `Back`
-- **🔍 Pinch-to-Zoom** — Inspect image details before annotating
-- **📊 Progress Dashboard** — Real-time annotation progress per subfolder
-- **🎨 Visual Status Indicators** — Color-coded badges (🟢 True, 🔴 False, ⚪ Skip, 🔵 New)
-- **⚡ Smart Preloading** — Caches 50 upcoming + 20 previous images for instant navigation
-- **📡 LAN Access** — Annotate from your phone while the server runs on your desktop
-- **💾 Persistent Storage** — Annotations saved as JSON in the image directory
-- **📊 Dataset Mode** — Load labels from a CSV file (e.g., `labels.csv`) to review existing predictions
+**Key specs (source-verified):**
+- Images served at **full resolution** — no resizing (`res.sendFile`, `server.js:298`)
+- **70-image preload window**: 50 ahead + 20 behind current index (`AnnotationView.jsx:63-64`)
+- **1-hour browser cache** per image (`Cache-Control: public, max-age=3600`, `server.js:297`)
+- Annotations written to **Redis first**, flushed to `annotations.json` asynchronously via atomic rename
 
 ---
 
-## 🛠️ Technical Specifications
+## Tech Stack
 
-- **🖼️ Image Resolution** — Images are served at **full resolution** (original disk quality) to enable precise inspection.
-- **⚡ Performance** — Background preloading of 70 images (50 ahead, 20 behind) ensures zero-latency navigation.
-- **💾 Storage Architecture** — Dual-layer persistence: **Redis** for high-speed session state + **JSON** for permanent disk storage.
-- **👆 Gesture Engine** — High-precision gesture handling with `@use-gesture`, supporting concurrent pan and zoom.
-- **🌐 Network** — Zero-config LAN discovery; serves over `0.0.0.0` for immediate mobile access.
-- **📦 Backend** — Node.js Express server with atomic file writes to prevent data corruption.
-- **⚛️ Frontend** — React 19 SPA optimized for mobile browsers (Chrome, Safari).
-- **📊 Data Interop** — Supports standard CSV formats for importing existing labels or pseudo-labels.
+| Layer      | Technology                                      |
+|------------|-------------------------------------------------|
+| Frontend   | React 19, Vite 5, Tailwind CSS 4                |
+| Gestures   | @use-gesture/react                              |
+| Animations | Framer Motion, React Spring                     |
+| Backend    | Node.js, Express 5                              |
+| Storage    | Redis (primary) + `annotations.json` (disk sync)|
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────┐       ┌──────────────────────────┐
-│   Phone (Browser)       │◄─────►│  Desktop (Node Server)   │
-│                         │  LAN  │                          │
-│  React SPA (Vite)       │       │  Express API (port 3001) │
-│  - Dashboard            │       │  - Serves images         │
-│  - SubfolderView        │       │  - Manages annotations   │
-│  - AnnotationView       │       │  - annotations.json      │
-└─────────────────────────┘       └──────────────────────────┘
+┌──────────────────────┐       ┌───────────────────────────────┐
+│  Phone (Browser)     │◄─────►│  Desktop                      │
+│                      │  LAN  │                               │
+│  React SPA (Vite)    │       │  Express API    :3001         │
+│  - Dashboard         │       │  Redis          :6379         │
+│  - SubfolderView     │       │  annotations.json (disk sync) │
+│  - AnnotationView    │       │                               │
+└──────────────────────┘       └───────────────────────────────┘
 ```
 
-### Tech Stack
-
-| Layer      | Technology                              |
-|------------|-----------------------------------------|
-| Frontend   | React 19, Vite 8, Tailwind CSS 4        |
-| Animations | Framer Motion, React Spring             |
-| Gestures   | @use-gesture/react                      |
-| Backend    | Node.js, Express 5                      |
-| Icons      | Lucide React                            |
+Annotations are written to Redis on every save and asynchronously flushed to `annotations.json` (atomic rename). On startup, `annotations.json` is loaded into Redis if it exists.
 
 ---
 
-## 🚀 Getting Started
+## Prerequisites
 
-### Prerequisites
-
-- **Node.js** ≥ 18
-- **npm** ≥ 9
-- A folder of images organized in subfolders:
+- Node.js ≥ 18, npm ≥ 9
+- Docker (for Redis)
+- Images organized as:
   ```
   MyImages/
-  ├── cats/
+  ├── subfolder_a/
   │   ├── img001.jpg
   │   └── img002.png
-  ├── dogs/
-  │   ├── img003.jpg
-  │   └── img004.png
-  └── ...
+  └── subfolder_b/
+      └── img003.jpg
   ```
+  Images placed directly in the root are served under a virtual **"Root Images"** folder.
 
-### 📊 Dataset Mode (CSV Support)
+---
 
-DeepAnnotate can load existing labels or pseudo-labels from a CSV file. If a `.csv` file is found in the root folder, a special **"Dataset Mode"** folder will appear in the dashboard.
-
-#### Method of making the CSV:
-If you are using Python/Pandas, you can generate the compatible CSV like this:
-
-```python
-import pandas as pd
-
-# Create a dataframe with your images and labels
-df = pd.DataFrame({
-    'image_name': ['img1.jpg', 'img2.png'],
-    'label': ['clear', 'noisy']
-})
-
-# Save it to the root of your image folder
-# IMPORTANT: Use index=False to avoid "Unnamed: 0" columns
-df.to_csv('labels.csv', index=False)
-```
-
-**Requirements:**
-- The CSV must have one column for **filenames** (e.g., `image_name`, `filename`, `image`)
-- The CSV must have one column for **labels** (e.g., `label`, `class`, `pseudo_label`)
-- Place the `.csv` file directly inside the `ROOT_FOLDER`.
-
-### Installation
+## Setup & Usage
 
 ```bash
 git clone https://github.com/SandeeeeeeeeepDey/phone_responsive_classification_annot_app.git
 cd phone_responsive_classification_annot_app
 npm install
-```
-
-### Usage
-
-#### 1. Build the frontend
-
-```bash
 npm run build
-```
 
-#### 2. Start the server
+# Start Redis
+docker compose up -d
 
-```bash
-node server.js "path/to/your/image/folder"
-```
-
-**Example:**
-```bash
+# Start server (pass your image folder as the argument)
 node server.js "D:\MyDataset\Images"
 ```
 
-#### 3. Open on your phone
+On startup, the server prints the network URL — open it on your phone (same Wi-Fi network).
 
-The server prints a network URL on startup — open it on your phone's browser:
+---
 
+## Gesture Controls
+
+Gestures are **only active when the image is fully zoomed out** (`scale = 1`). While zoomed in, all touch events pan the image.
+
+| Gesture     | Action                                                        |
+|-------------|---------------------------------------------------------------|
+| Swipe →     | **Confirm** — applies pseudo-label or first class in list     |
+| Swipe ←     | **Relabel** — opens class picker to select a different class  |
+| Swipe ↑     | **Skip**                                                      |
+| Swipe ↓     | **Back** — go to previous image                               |
+| Pinch       | Zoom in/out (max 5×)                                          |
+
+---
+
+## Dataset Mode (CSV)
+
+Place a `.csv` file in the root image folder. The server auto-detects it and adds a **"Dataset Mode"** folder in the dashboard showing existing labels for review.
+
+**Column detection** (case-insensitive, partial match):
+- Image column: header contains `image`, `file`, or `name` (excluding `unnamed`)
+- Label column: header contains `label`, `class`, or `pseudo` (excluding `unnamed`)
+
+```python
+# Minimum viable CSV (Pandas)
+df.to_csv('labels.csv', index=False)  # columns: image_name, label
 ```
-┌──────────────────────────────────────────────────────┐
-│       🖼️  DeepAnnotate Server Running                │
-├──────────────────────────────────────────────────────┤
-│  📁 Root:  D:\MyDataset\Images                       │
-│  📝 Annotations: D:\MyDataset\Images\annotations.json│
-├──────────────────────────────────────────────────────┤
-│  Local:   http://localhost:3001                       │
-│  Network: http://192.168.1.42:3001                   │
-└──────────────────────────────────────────────────────┘
-```
 
-> **Tip:** Your phone and desktop must be on the same Wi-Fi network.
+---
 
-### Development Mode
-
-For development with hot-reload:
+## Development Mode
 
 ```bash
-# Terminal 1 — Start the backend
+# Terminal 1
+docker compose up -d
 node server.js "path/to/images"
 
-# Terminal 2 — Start Vite dev server
+# Terminal 2 — hot reload, proxies /api to :3001
 npm run dev
-
-# 📊 Dataset Mode (CSV)
-# 1. Create a CSV (e.g. labels_2.csv) with columns: image_name, label
-# 2. Place it in the selected folder
-# 3. If using Pandas: df.to_csv('labels_2.csv', index=False)
 ```
 
-The Vite dev server proxies `/api` requests to the backend automatically.
-
 ---
 
-## 📖 Gesture Guide
+## API Reference
 
-| Gesture       | Action           |
-|---------------|------------------|
-| **Swipe →**   | Mark as **True** |
-| **Swipe ←**   | Mark as **False**|
-| **Swipe ↑**   | **Skip** image   |
-| **Swipe ↓**   | Go **Back**      |
-| **Pinch**     | Zoom in/out      |
+| Method   | Endpoint                        | Description                          |
+|----------|---------------------------------|--------------------------------------|
+| `GET`    | `/api/config`                   | Server config (`rootPath`)           |
+| `GET`    | `/api/folders`                  | Folders with annotation counts       |
+| `GET`    | `/api/folders/:name/images`     | Images in a folder                   |
+| `GET`    | `/api/images/:folder/:filename` | Serve image file (1h cache)          |
+| `GET`    | `/api/annotations`              | All annotations                      |
+| `POST`   | `/api/annotations`              | Save `{ key, status }`               |
+| `DELETE` | `/api/annotations`              | Reset all annotations                |
+| `GET`    | `/api/pseudo-labels`            | CSV-loaded labels map                |
 
----
-
-## 🔌 API Reference
-
-| Method   | Endpoint                          | Description                        |
-|----------|-----------------------------------|------------------------------------|
-| `GET`    | `/api/config`                     | Server configuration               |
-| `GET`    | `/api/folders`                    | List folders with annotation counts|
-| `GET`    | `/api/folders/:name/images`       | List images in a folder            |
-| `GET`    | `/api/images/:folder/:filename`   | Serve an image file                |
-| `GET`    | `/api/annotations`                | Get all annotations                |
-| `POST`   | `/api/annotations`                | Save annotation `{ key, status }`  |
-| `DELETE` | `/api/annotations`                | Reset all annotations              |
-
-### Annotation Format
-
-Annotations are stored as `annotations.json` in the root image folder:
-
+**Annotation storage format** (`annotations.json`):
 ```json
 {
-  "cats/img001.jpg": "true",
-  "cats/img002.png": "false",
-  "dogs/img003.jpg": "skip"
+  "subfolder_a/img001.jpg": "true",
+  "subfolder_a/img002.png": "false",
+  "subfolder_b/img003.jpg": "skip"
 }
 ```
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 phone_responsive_classification_annot_app/
-├── server.js                  # Express backend (API + static serving)
-├── index.html                 # Vite entry point
-├── vite.config.js             # Vite config (proxy, host)
-├── package.json
-├── postcss.config.js
-├── tailwind.config.js
+├── server.js                  # Express API + static serving + Redis client
+├── docker-compose.yml         # Redis container
+├── vite.config.js             # Vite config (proxy /api → :3001, host 0.0.0.0)
 ├── src/
-│   ├── main.jsx               # React entry
-│   ├── App.jsx                # Root component + context provider
-│   ├── App.css                # App-level styles
-│   ├── index.css              # Global styles + design tokens
+│   ├── App.jsx                # Root component + annotation context
 │   ├── components/
 │   │   ├── Dashboard.jsx      # Folder list + progress overview
 │   │   ├── SubfolderView.jsx  # Image grid within a folder
-│   │   └── AnnotationView.jsx # Gesture-driven annotation interface
-│   └── assets/
-├── dist/                      # Production build (gitignored)
-└── public/                    # Static assets
+│   │   └── AnnotationView.jsx # Gesture annotation interface
+│   └── index.css              # Global styles + design tokens
+└── dist/                      # Production build (gitignored)
 ```
 
 ---
 
-## 📝 License
+## License
 
-This project is open source and available under the [MIT License](LICENSE).
+MIT
