@@ -1,5 +1,19 @@
+npm i
+
 npm run build
 
+docker compose up -d
 
-node server.js "D:\AwesomenessProwess\DocuXray\docuxary_ai_engine\Dataset\BankStatements"
+node server.js "C:\Users\xelpmoc\Downloads\my_half_quality_annot\selected"
 
+node server.js "D:\30k_to_7k_clear"
+
+
+npm run dev
+
+# 📊 Dataset Mode (CSV)
+# 1. Create a CSV (e.g. labels.csv) with columns: image_name(should contain "image" or "file" or "name"), label(should contain "label" or "class" or "pseudo")
+# 2. Place it in the selected folder
+# 3. If using Pandas: df.to_csv('labels.csv', index=False)
+
+make sure the first column with such strings are the concerned ones

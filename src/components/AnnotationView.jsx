@@ -3,13 +3,16 @@ import { useAppContext } from '../App';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSpring, animated } from '@react-spring/web';
 import { useGesture } from '@use-gesture/react';
-import { ChevronLeft, Check, X, SkipForward, RefreshCw, ZoomIn, Eye } from 'lucide-react';
+import { ChevronLeft, Check, X, SkipForward, RefreshCw, ZoomIn, Eye, ArrowLeft, Info, ArrowRight, EyeOff, WifiOff } from 'lucide-react';
 
 export default function AnnotationView() {
   const {
     activeFolder, getImagesForFolder, loadFolderImages,
-    setCurrentView, annotations, handleAnnotate, getImageUrl
+    setCurrentView, annotations, handleAnnotate, getImageUrl,
+    pseudoLabels, isOnline, pendingCount
   } = useAppContext();
+
+  const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage', 'rotated'];
 
   // ─── Image list ──────────────────────────────────────────────────────────
   const [allImages, setAllImages] = useState(getImagesForFolder(activeFolder));
@@ -111,21 +114,26 @@ export default function AnnotationView() {
   const [{ x, y, scale }, api] = useSpring(() => ({ x: 0, y: 0, scale: 1 }));
 
   // ─── Gesture feedback state ──────────────────────────────────────────────
+  const [showClassPicker, setShowClassPicker] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
   const [gestureFeedback, setGestureFeedback] = useState(null);
+  const [hideOverlay, setHideOverlay] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
-  // ─── Actions (use refs to avoid stale closures in gesture handler) ──────
+  // Sync refs to avoid stale closures in gesture handlers
   const currentIndexRef = useRef(currentIndex);
-  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
-
   const allImagesRef = useRef(allImages);
-  useEffect(() => { allImagesRef.current = allImages; }, [allImages]);
-
   const handleAnnotateRef = useRef(handleAnnotate);
+
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { allImagesRef.current = allImages; }, [allImages]);
   useEffect(() => { handleAnnotateRef.current = handleAnnotate; }, [handleAnnotate]);
 
-  const [isRegistering, setIsRegistering] = useState(false);
+  // ─── Actions (use refs to avoid stale closures in gesture handler) ──────
+  const { foldersInfo } = useAppContext();
+  const classNames = TARGET_CLASSES;
 
-  const doDecision = useCallback((status) => {
+  const doDecision = useCallback((statusOrClass) => {
     const idx = currentIndexRef.current;
     const imgs = allImagesRef.current;
     const imgName = imgs[idx];
@@ -133,9 +141,10 @@ export default function AnnotationView() {
 
     // Trigger visual registration feedback
     setIsRegistering(true);
+    setShowClassPicker(false);
 
     const key = `${activeFolder}/${imgName}`;
-    handleAnnotateRef.current(key, status);
+    handleAnnotateRef.current(key, statusOrClass);
 
     // Short delay for the user to see the "registered" state pulse
     setTimeout(() => {
@@ -148,6 +157,12 @@ export default function AnnotationView() {
     }, 200);
   }, [activeFolder, setCurrentView]);
 
+  const openClassPicker = useCallback(() => {
+    setShowClassPicker(true);
+    // Reset spring but keep current scale for the background
+    api.start({ x: 0, y: 0, immediate: false });
+  }, [api]);
+
   const goBack = useCallback(() => {
     setIsRegistering(true);
     setTimeout(() => {
@@ -156,16 +171,69 @@ export default function AnnotationView() {
     }, 200);
   }, []);
 
+  const goNext = useCallback(() => {
+    setIsRegistering(true);
+    setTimeout(() => {
+       setIsRegistering(false);
+       setCurrentIndex(c => Math.min(allImagesRef.current.length - 1, c + 1));
+    }, 200);
+  }, []);
+
+  useEffect(() => {
+    setHideOverlay(false);
+  }, [currentIndex]);
+
   // ─── Gesture handler ────────────────────────────────────────────────────
+  // Track if a two-finger gesture was active so we can cancel the drag on release
+  const wasTwoFingerRef = useRef(false);
+
   const bind = useGesture({
     onDrag: (state) => {
-      const { movement: [mx, my] } = state;
+      if (showClassPicker) return; // Disable gestures when picker is open
+
+      const { movement: [mx, my], event, first, touches } = state;
+
+      // ── Two-finger guard ────────────────────────────────────────────────
+      // If 2+ fingers are active, this is part of a pinch – ignore completely.
+      if (touches >= 2) {
+        wasTwoFingerRef.current = true;
+        setGestureFeedback(null);
+        return state.memo; // keep memo but do nothing
+      }
+
+      // If the drag started with 2 fingers and we just dropped to 1, cancel the
+      // whole gesture so the lifting finger doesn't trigger a swipe action.
+      if (wasTwoFingerRef.current) {
+        if (state.last) {
+          wasTwoFingerRef.current = false;
+          api.start({ x: 0, y: 0, immediate: false });
+        }
+        setGestureFeedback(null);
+        return state.memo;
+      }
+      // ────────────────────────────────────────────────────────────────────
+
+      // Maintain start position for seamless panning across multiple drags
+      let startPos = state.memo;
+      if (first) {
+        startPos = [x.get(), y.get()];
+      }
+      
       const triggerThreshold = 100;
 
-      // If zoomed in, allow panning instead of swiping
-      if (scale.get() > 1 && !state.last) {
-        api.start({ x: mx, y: my, immediate: true });
-        return;
+      // Check if touch originates on the image wrapper
+      const isTargetImage = event && event.target && typeof event.target.closest === 'function' && event.target.closest('.image-pan-area') !== null;
+
+      // If zoomed in and touching the image, allow panning instead of swiping
+      if (scale.get() > 1 && isTargetImage) {
+        const s = scale.get();
+        const maxPanX = (s - 1) * window.innerWidth / 2;
+        const maxPanY = (s - 1) * window.innerHeight / 2;
+        const nextX = Math.max(-maxPanX, Math.min(maxPanX, startPos[0] + mx));
+        const nextY = Math.max(-maxPanY, Math.min(maxPanY, startPos[1] + my));
+
+        api.start({ x: nextX, y: nextY, immediate: !state.last });
+        return startPos;
       }
 
       // Live gesture feedback
@@ -184,8 +252,16 @@ export default function AnnotationView() {
         let acted = false;
 
         if (Math.abs(mx) > triggerThreshold && Math.abs(mx) > Math.abs(my)) {
-          if (mx > 0) { doDecision('true'); acted = true; }
-          else { doDecision('false'); acted = true; }
+          if (mx > 0) { 
+            // Confirm pseudo label or first class
+            const pseudo = pseudoLabels[currentImageName];
+            doDecision(pseudo && TARGET_CLASSES.includes(pseudo.toLowerCase()) ? pseudo.toLowerCase() : TARGET_CLASSES[0]);
+            acted = true; 
+          }
+          else { 
+            openClassPicker(); // Show classes to relabel
+            acted = true; 
+          }
         } else if (Math.abs(my) > triggerThreshold && Math.abs(my) > Math.abs(mx)) {
           if (my < 0) { doDecision('skip'); acted = true; }
           else { goBack(); acted = true; }
@@ -195,12 +271,28 @@ export default function AnnotationView() {
         return;
       }
 
-      if (scale.get() <= 1) {
-        api.start({ x: state.active ? mx : 0, y: state.active ? my : 0, immediate: state.active });
-      }
+      // Animate swiping when not panning
+      api.start({ x: state.active ? mx : 0, y: state.active ? my : 0, immediate: state.active });
+      return startPos;
     },
-    onPinch: ({ offset: [s] }) => {
-      api.start({ scale: s });
+    onPinch: ({ offset: [s], last }) => {
+      if (s <= 1) {
+        if (last) {
+          // Only snap to center when both fingers are fully lifted
+          api.start({ scale: 1, x: 0, y: 0, immediate: false });
+        } else {
+          // While still pinching, just update the scale without touching x/y
+          api.start({ scale: s });
+        }
+      } else {
+        // Dynamically clamp pan based on scale to ensure it naturally centers while zooming out
+        const maxPanX = (s - 1) * window.innerWidth / 2;
+        const maxPanY = (s - 1) * window.innerHeight / 2;
+        const nextX = Math.max(-maxPanX, Math.min(maxPanX, x.get()));
+        const nextY = Math.max(-maxPanY, Math.min(maxPanY, y.get()));
+        
+        api.start({ scale: s, x: nextX, y: nextY });
+      }
     },
   }, {
     drag: { filterTaps: true },
@@ -219,12 +311,18 @@ export default function AnnotationView() {
 
   // Status badge color/icon/label
   const getStatusInfo = (status) => {
-    switch (status) {
-      case 'true':  return { icon: <Check size={20} />, label: 'TRUE',    color: 'text-green-400', bg: 'bg-green-500/20', border: 'border-green-500/40' };
-      case 'false': return { icon: <X size={20} />,     label: 'FALSE',   color: 'text-red-400',   bg: 'bg-red-500/20',   border: 'border-red-500/40' };
-      case 'skip':  return { icon: <SkipForward size={20} />, label: 'SKIPPED', color: 'text-yellow-400', bg: 'bg-yellow-500/20', border: 'border-yellow-500/40' };
-      default:      return { icon: <Eye size={20} />,   label: 'NEW',     color: 'text-blue-400',  bg: 'bg-blue-500/20',  border: 'border-blue-500/40' };
-    }
+    if (!status) return { icon: <Eye size={20} />, label: 'NEW', color: 'text-blue-400', bg: 'bg-blue-500/20', border: 'border-blue-500/40' };
+    if (status === 'skip') return { icon: <SkipForward size={20} />, label: 'SKIPPED', color: 'text-yellow-400', bg: 'bg-yellow-500/20', border: 'border-yellow-500/40' };
+    if (status === 'true' || status === activeFolder) return { icon: <Check size={20} />, label: activeFolder.toUpperCase(), color: 'text-green-400', bg: 'bg-green-500/20', border: 'border-green-500/40' };
+    
+    // Custom class label
+    return { 
+      icon: <RefreshCw size={20} />, 
+      label: status.toUpperCase(), 
+      color: 'text-purple-400', 
+      bg: 'bg-purple-500/20', 
+      border: 'border-purple-500/40' 
+    };
   };
 
   const statusInfo = getStatusInfo(currentStatus);
@@ -245,37 +343,59 @@ export default function AnnotationView() {
           <ChevronLeft size={28} />
         </button>
         <div className="flex flex-col items-center">
-          <span className="text-xs text-slate-400 font-medium">
-            IMAGE {currentIndex + 1} OF {allImages.length}
-          </span>
-          <span className="text-xs text-blue-400 tracking-wider">
-            {initialLoading
-              ? `CACHING ${preloadProgress.loaded}/${preloadProgress.total}...`
-              : `${pastCount} PAST · ${futureCount} NEXT CACHED`
-            }
-          </span>
+          <h3 className="text-sm font-black text-white tracking-widest uppercase mb-0.5">
+            {activeFolder === '_root' ? 'ROOT IMAGES' : activeFolder}
+          </h3>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
+              IMAGE {currentIndex + 1} OF {allImages.length}
+            </span>
+            <span className="text-[10px] text-blue-400 font-bold tracking-tight whitespace-nowrap">
+              {initialLoading ? 'LOADING...' : 'CACHED'}
+            </span>
+          </div>
         </div>
         {/* Status badge in header */}
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold ${statusInfo.bg} ${statusInfo.color} ${statusInfo.border} border`}>
-          {statusInfo.icon}
+        <div className="flex items-center gap-2">
+          {(!isOnline || pendingCount > 0) && (
+            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black border shadow-sm ${!isOnline ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'}`}>
+              {!isOnline ? <WifiOff size={14} /> : <RefreshCw size={14} className="animate-spin" />}
+              {!isOnline ? 'OFFLINE' : `${pendingCount} PENDING`}
+            </div>
+          )}
+          <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold ${statusInfo.bg} ${statusInfo.color} ${statusInfo.border} border`}>
+            {statusInfo.icon}
+          </div>
         </div>
       </div>
 
       {/* Main Annotation Area */}
-      <div className="flex-1 relative flex items-center justify-center overflow-hidden w-full h-full p-4">
+      <div {...bind()} style={{ touchAction: showClassPicker ? 'auto' : 'none' }} className="flex-1 relative flex flex-col items-center justify-center overflow-hidden w-full h-full p-4">
+        
+        {/* Pseudo Label Hint (Moved outside/above image) */}
+        {pseudoLabels[currentImageName] && !currentStatus && !initialLoading && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 z-20"
+          >
+            <div className="bg-slate-900/90 backdrop-blur-md px-6 py-2 rounded-2xl border border-blue-500/30 flex flex-col items-center shadow-lg">
+               <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest mb-0.5">Pseudo Label</span>
+               <span className="text-2xl font-black text-white uppercase">{pseudoLabels[currentImageName]}</span>
+            </div>
+          </motion.div>
+        )}
 
         {/* Always render the image once initial loading is done */}
         {!initialLoading && currentUrl && (
           <animated.div
             key={currentIndex}
-            {...bind()}
             style={{ 
               x, y, 
               scale: isRegistering ? 0.95 : scale, 
-              opacity: isRegistering ? 0.8 : 1,
-              touchAction: 'none' 
+              opacity: isRegistering ? 0.8 : 1
             }}
-            className={`w-full h-full max-h-[70vh] rounded-2xl overflow-hidden glass shadow-2xl relative select-none will-change-transform transition-colors duration-200 ${isRegistering ? 'ring-4 ring-white/50' : ''}`}
+            className={`image-pan-area w-full h-full max-h-[70vh] rounded-2xl overflow-hidden glass shadow-2xl relative select-none will-change-transform transition-colors duration-200 ${isRegistering ? 'ring-4 ring-white/50' : ''}`}
           >
             {/* Registration Flash Overlay */}
             <AnimatePresence>
@@ -297,15 +417,30 @@ export default function AnnotationView() {
             />
 
             {/* Status overlay for annotated images */}
-            {currentStatus && (
+            {currentStatus && !hideOverlay && (
               <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center p-6 text-center">
-                {currentStatus === 'true' && <Check size={80} className="text-green-500 drop-shadow-[0_0_15px_rgba(34,197,94,0.5)] mb-4" />}
-                {currentStatus === 'false' && <X size={80} className="text-red-500 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)] mb-4" />}
-                {currentStatus === 'skip' && <SkipForward size={80} className="text-slate-300 drop-shadow-[0_0_15px_rgba(203,213,225,0.5)] mb-4" />}
-                <p className="text-xl font-bold uppercase tracking-wider text-white">
-                  {currentStatus === 'true' ? 'Marked True' : currentStatus === 'false' ? 'Marked False' : 'Skipped'}
-                </p>
-                <p className="text-slate-300 mt-2">Swipe again to change, or swipe down to go back.</p>
+                {currentStatus === 'skip' ? (
+                  <>
+                    <SkipForward size={80} className="text-slate-300 drop-shadow-[0_0_15px_rgba(203,213,225,0.5)] mb-4" />
+                    <p className="text-xl font-bold uppercase tracking-wider text-white">Skipped</p>
+                  </>
+                ) : (
+                  <>
+                    <Check size={80} className={`${currentStatus === activeFolder ? 'text-green-500' : 'text-purple-500'} drop-shadow-md mb-4`} />
+                    <p className="text-xl font-bold uppercase tracking-wider text-white">
+                      Label: {currentStatus === 'true' ? activeFolder : currentStatus}
+                    </p>
+                  </>
+                )}
+                <div className="flex flex-col gap-3 mt-6 w-full max-w-[200px]">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); openClassPicker(); }}
+                    className="bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded-xl backdrop-blur-md border border-white/20 text-sm font-bold transition-all"
+                  >
+                    Change Class
+                  </button>
+                  <p className="text-slate-400 text-xs mt-2">Swipe down to go back.</p>
+                </div>
               </div>
             )}
 
@@ -327,7 +462,7 @@ export default function AnnotationView() {
                       <Check size={48} className="text-white drop-shadow-md" />
                     </div>
                     <span className="text-white font-bold tracking-widest mt-4 uppercase text-sm bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
-                      {Math.abs(x.get()) >= 100 ? 'RELEASE TO CONFIRM' : 'SWIPE TO APPROVE'}
+                      {Math.abs(x.get()) >= 100 ? 'RELEASE TO CONFIRM' : `CONFIRM ${pseudoLabels[currentImageName] || TARGET_CLASSES[0]}`}
                     </span>
                   </div>
                 </motion.div>
@@ -341,14 +476,14 @@ export default function AnnotationView() {
                     scale: Math.abs(x.get()) >= 100 ? 1.2 : 1
                   }} 
                   exit={{ opacity: 0, scale: 0.5 }}
-                  className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-red-500/40 to-transparent flex items-center justify-start pl-12 pointer-events-none z-20"
+                  className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-purple-500/40 to-transparent flex items-center justify-start pl-12 pointer-events-none z-20"
                 >
                   <div className="flex flex-col items-center">
-                    <div className={`p-4 rounded-full ${Math.abs(x.get()) >= 100 ? 'bg-red-500 shadow-[0_0_20px_rgba(239,68,68,0.6)]' : 'bg-red-500/20'} transition-all duration-200`}>
-                      <X size={48} className="text-white drop-shadow-md" />
+                    <div className={`p-4 rounded-full ${Math.abs(x.get()) >= 100 ? 'bg-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.6)]' : 'bg-purple-500/20'} transition-all duration-200`}>
+                      <RefreshCw size={48} className="text-white drop-shadow-md" />
                     </div>
                     <span className="text-white font-bold tracking-widest mt-4 uppercase text-sm bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
-                      {Math.abs(x.get()) >= 100 ? 'RELEASE TO REJECT' : 'SWIPE TO REJECT'}
+                      {Math.abs(x.get()) >= 100 ? 'RELEASE TO RELABEL' : 'RECLASSIFY'}
                     </span>
                   </div>
                 </motion.div>
@@ -405,6 +540,52 @@ export default function AnnotationView() {
           </animated.div>
         )}
 
+        {/* Class Selection Picker */}
+        <AnimatePresence>
+          {showClassPicker && (
+            <motion.div
+              initial={{ opacity: 0, y: 100 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
+              className="absolute inset-0 z-[100] bg-slate-950/90 backdrop-blur-lg flex flex-col p-6"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl font-bold text-white uppercase tracking-tighter">Relabel As...</h2>
+                <button 
+                  onClick={() => setShowClassPicker(false)}
+                  className="p-2 bg-slate-800 rounded-full text-white"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 overflow-y-auto pb-10">
+                {classNames.map(name => (
+                  <button
+                    key={name}
+                    onClick={() => doDecision(name)}
+                    className={`p-5 rounded-2xl text-left border transition-all active:scale-95 flex flex-col justify-between h-32 ${activeFolder === name ? 'bg-green-500/20 border-green-500/50' : 'bg-slate-900 border-slate-800'}`}
+                  >
+                    <div className="p-2 bg-slate-800 rounded-lg w-fit">
+                      {activeFolder === name ? <Check size={16} className="text-green-400" /> : <Eye size={16} className="text-blue-400" />}
+                    </div>
+                    <span className="font-bold text-white text-lg leading-tight truncate w-full">{name}</span>
+                  </button>
+                ))}
+              </div>
+              
+              <div className="mt-auto pt-4 border-t border-slate-800">
+                <button 
+                  onClick={() => setShowClassPicker(false)}
+                  className="w-full py-4 text-slate-400 font-bold"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Initial loading overlay (only shown once) */}
         <AnimatePresence>
           {initialLoading && (
@@ -440,24 +621,83 @@ export default function AnnotationView() {
       </div>
 
       {/* Guide Footer */}
-      <div className="h-20 bg-slate-900/80 backdrop-blur-lg border-t border-slate-800 flex items-center justify-around px-2 pb-safe">
-        <div className="flex flex-col items-center opacity-70">
-          <ChevronLeft size={20} className="mb-1 text-red-500" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">False</span>
-        </div>
-        <div className="flex flex-col items-center opacity-70">
-          <Check size={20} className="mb-1 text-green-500" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">True</span>
-        </div>
-        <div className="flex flex-col items-center opacity-70">
-          <SkipForward size={20} className="mb-1 text-slate-300" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Skip (Up)</span>
-        </div>
-        <div className="flex flex-col items-center opacity-70">
-          <ZoomIn size={20} className="mb-1 text-blue-400" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Pinch</span>
-        </div>
+      <div className="h-20 bg-slate-900/80 backdrop-blur-lg border-t border-slate-800 flex items-center justify-around px-2 pb-safe z-20">
+        <button 
+          onClick={goBack}
+          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all w-16"
+        >
+          <ArrowLeft size={24} className="mb-1 text-blue-400" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Back</span>
+        </button>
+        
+        <button 
+          onClick={() => setShowGuide(true)}
+          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all w-16"
+        >
+          <Info size={24} className="mb-1 text-slate-300" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Guide</span>
+        </button>
+
+        <button 
+          onClick={() => setHideOverlay(prev => !prev)}
+          disabled={!currentStatus}
+          className={`flex flex-col items-center hover:opacity-100 active:scale-90 transition-all w-16 ${currentStatus ? (hideOverlay ? 'opacity-100 text-purple-400' : 'opacity-80 text-white') : 'opacity-30 cursor-not-allowed text-slate-500'}`}
+        >
+          {hideOverlay ? <EyeOff size={24} className="mb-1" /> : <Eye size={24} className="mb-1" />}
+          <span className="text-[10px] font-bold uppercase tracking-wider">View</span>
+        </button>
+
+        <button 
+          onClick={goNext}
+          className="flex flex-col items-center opacity-80 hover:opacity-100 active:scale-90 transition-all w-16"
+        >
+          <ArrowRight size={24} className="mb-1 text-blue-400" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Next</span>
+        </button>
       </div>
+
+      {/* Guide Modal */}
+      <AnimatePresence>
+        {showGuide && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.95 }}
+            className="absolute bottom-24 left-4 right-4 p-5 bg-slate-900/95 backdrop-blur-xl border border-slate-700 rounded-2xl z-[100] shadow-2xl flex flex-col gap-4"
+          >
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="text-white font-bold uppercase tracking-wider text-sm">Gesture Guide</h3>
+              <button onClick={() => setShowGuide(false)} className="text-slate-400 hover:text-white p-1 bg-slate-800 rounded-full">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-red-500/20 rounded-lg text-red-500"><ChevronLeft size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Swipe Left<br/><b className="text-white text-xs">Relabel</b></span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-green-500/20 rounded-lg text-green-500"><Check size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Swipe Right<br/><b className="text-white text-xs">Confirm</b></span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-slate-500/20 rounded-lg text-slate-300"><SkipForward size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Swipe Up<br/><b className="text-white text-xs">Skip</b></span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-xl">
+                <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400"><ZoomIn size={18} /></div>
+                <span className="text-[10px] text-slate-300 font-medium uppercase tracking-wider leading-tight">Pinch<br/><b className="text-white text-xs">Zoom In</b></span>
+              </div>
+            </div>
+            <div className="mt-2 bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex items-start gap-2">
+              <Info size={16} className="text-blue-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                To navigate, you must either <b className="text-blue-300">zoom out completely</b> or <b className="text-blue-300">swipe outside</b> the zoomed image area.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

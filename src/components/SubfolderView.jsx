@@ -6,8 +6,10 @@ import { ChevronLeft, Play, Check, X, SkipForward, AlertCircle, RefreshCw } from
 export default function SubfolderView() {
   const {
     activeFolder, getImagesForFolder, loadFolderImages,
-    setCurrentView, annotations, getImageUrl
+    setCurrentView, annotations, getImageUrl, pseudoLabels
   } = useAppContext();
+
+  const TARGET_CLASSES = ['clear', 'noisy', 'medium-noisy', 'non-informative', 'blank', 'multi-receipts', 'garbage', 'rotated'];
 
   const [images, setImages] = useState(getImagesForFolder(activeFolder));
   const [loading, setLoading] = useState(images.length === 0);
@@ -30,14 +32,14 @@ export default function SubfolderView() {
   // Calculate per-status counts
   const statusCounts = images.reduce((acc, img) => {
     const status = annotations[`${activeFolder}/${img}`];
-    if (status === 'true') acc.trueCount++;
-    else if (status === 'false') acc.falseCount++;
+    if (!status) acc.newCount++;
     else if (status === 'skip') acc.skipCount++;
-    else acc.newCount++;
+    else if (TARGET_CLASSES.includes(status) || status === 'true' || status === activeFolder) acc.matchCount++;
+    else acc.otherCount++; 
     return acc;
-  }, { trueCount: 0, falseCount: 0, skipCount: 0, newCount: 0 });
+  }, { matchCount: 0, otherCount: 0, skipCount: 0, newCount: 0 });
 
-  const annotatedCount = statusCounts.trueCount + statusCounts.falseCount + statusCounts.skipCount;
+  const annotatedCount = statusCounts.matchCount + statusCounts.otherCount + statusCounts.skipCount;
   const progressPercent = images.length ? Math.round((annotatedCount / images.length) * 100) : 0;
 
   // Show first 30 thumbnails
@@ -86,13 +88,13 @@ export default function SubfolderView() {
         <div className="grid grid-cols-4 gap-2">
           <div className="flex items-center gap-1.5 bg-slate-800/60 rounded-lg px-2 py-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0"></span>
-            <span className="text-xs text-green-300 font-medium">{statusCounts.trueCount}</span>
-            <span className="text-[10px] text-slate-500">True</span>
+            <span className="text-xs text-green-300 font-medium">{statusCounts.matchCount}</span>
+            <span className="text-[10px] text-slate-500">Match</span>
           </div>
           <div className="flex items-center gap-1.5 bg-slate-800/60 rounded-lg px-2 py-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0"></span>
-            <span className="text-xs text-red-300 font-medium">{statusCounts.falseCount}</span>
-            <span className="text-[10px] text-slate-500">False</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0"></span>
+            <span className="text-xs text-purple-300 font-medium">{statusCounts.otherCount}</span>
+            <span className="text-[10px] text-slate-500">Other</span>
           </div>
           <div className="flex items-center gap-1.5 bg-slate-800/60 rounded-lg px-2 py-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0"></span>
@@ -140,29 +142,27 @@ export default function SubfolderView() {
             const status = annotations[fileKey];
 
             // Color-coded border & dot based on annotation status
-            const borderColor = status === 'true'
-              ? 'border-green-400 shadow-[0_0_6px_rgba(74,222,128,0.4)]'
-              : status === 'false'
-              ? 'border-red-400 shadow-[0_0_6px_rgba(248,113,113,0.4)]'
+            const borderColor = !status
+              ? 'border-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.4)]'
               : status === 'skip'
               ? 'border-slate-400 shadow-[0_0_6px_rgba(148,163,184,0.3)]'
-              : 'border-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.4)]';
+              : (status === 'true' || status === activeFolder)
+              ? 'border-green-400 shadow-[0_0_6px_rgba(74,222,128,0.4)]'
+              : 'border-purple-400 shadow-[0_0_6px_rgba(192,132,252,0.4)]';
 
-            const dotColor = status === 'true'
-              ? 'bg-green-400'
-              : status === 'false'
-              ? 'bg-red-400'
+            const dotColor = !status
+              ? 'bg-blue-400'
               : status === 'skip'
               ? 'bg-slate-400'
-              : 'bg-blue-400';
+              : (status === 'true' || status === activeFolder)
+              ? 'bg-green-400'
+              : 'bg-purple-400';
 
-            const statusLabel = status === 'true'
-              ? 'True'
-              : status === 'false'
-              ? 'False'
+            const statusLabel = !status
+              ? 'New'
               : status === 'skip'
               ? 'Skip'
-              : 'New';
+              : status.toUpperCase();
 
             return (
               <div
@@ -185,8 +185,8 @@ export default function SubfolderView() {
                 {/* Overlay icon for annotated images */}
                 {status && (
                   <div className="absolute inset-0 bg-slate-900/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-200">
-                    {status === 'true' && <Check size={28} className="text-green-400 drop-shadow-md" />}
-                    {status === 'false' && <X size={28} className="text-red-400 drop-shadow-md" />}
+                    {(status === 'true' || status === activeFolder) && <Check size={28} className="text-green-400 drop-shadow-md" />}
+                    {(status !== 'skip' && status !== 'true' && status !== activeFolder) && <RefreshCw size={28} className="text-purple-400 drop-shadow-md" />}
                     {status === 'skip' && <SkipForward size={24} className="text-slate-300 drop-shadow-md" />}
                   </div>
                 )}
